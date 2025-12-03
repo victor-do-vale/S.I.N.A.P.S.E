@@ -1,0 +1,112 @@
+from machine import Pin, PWM
+import utime
+
+# -----------------------------------------
+#   Configuração dos pinos
+# -----------------------------------------
+
+# TRIG (emissor) do sensor ultrassônico HC-SR04
+TRIG = Pin(3, Pin.OUT)
+# ECHO (receptor) do sensor HC-SR04
+ECHO = Pin(2, Pin.IN)
+
+# LEDs indicando nível da água
+led_amarelo = Pin(7, Pin.OUT)
+led_vermelho = Pin(6, Pin.OUT)
+
+# Buzzer piezo para alertas
+buzzer = PWM(Pin(10))
+
+
+# -----------------------------------------
+#   Função para medir distância (corrigida)
+# -----------------------------------------
+def medir_distancia():
+    # Garante que o TRIG esteja em nível baixo antes do pulso
+    TRIG.low()
+    utime.sleep_us(2)
+
+    # Pulso de 10 microsegundos para disparar o sensor
+    TRIG.high()
+    utime.sleep_us(10)
+    TRIG.low()
+
+    start = 0  # tempo em que o pulso começa
+    end = 0    # tempo em que o pulso termina
+
+    # Aguarda o início da recepção do sinal (ECHO = HIGH)
+    timeout = utime.ticks_us() + 30000  # timeout de ~30 ms
+    while ECHO.value() == 0:
+        start = utime.ticks_us()
+        if utime.ticks_us() > timeout:
+            return -1  # erro se o sensor não responder
+
+    # Aguarda o fim do pulso (ECHO volta para LOW)
+    timeout = utime.ticks_us() + 30000
+    while ECHO.value() == 1:
+        end = utime.ticks_us()
+        if utime.ticks_us() > timeout:
+            return -1  # erro se o sinal durar tempo demais
+
+    # Calcula duração do pulso
+    duracao = end - start
+
+    # Converte tempo em distância:
+    # velocidade do som = 343 m/s = 0.0343 cm/us
+    # divide por 2 porque o pulso vai e volta
+    distancia = (duracao * 0.0343) / 2
+
+    return distancia
+
+
+# -----------------------------------------
+#   Loop principal do sistema
+# -----------------------------------------
+
+print("Sistema de nível de água iniciado...")
+
+while True:
+
+    dist = medir_distancia()
+
+    # Se houve erro na leitura, apenas avisa e reinicia
+    if dist == -1:
+        print("Erro ao medir distância.")
+        continue
+
+    print("Distância medida:", dist, "cm")
+
+    # -------------------------------------
+    #       LÓGICA DE NÍVEL DA ÁGUA
+    # -------------------------------------
+
+    if dist > 25:
+        # Se a distância é grande, significa água muito baixa
+        print("⚠️ Nível CRÍTICO! Reservatório quase vazio!")
+        
+        led_vermelho.on()     # alerta vermelho
+        led_amarelo.off()     # desliga LED amarelo
+
+        buzzer.freq(1500)     # frequência do alarme sonoro
+        buzzer.duty_u16(20000) # volume/força do sinal PWM
+
+    elif 10 < dist <= 25:
+        # Distância intermediária: nível de atenção
+        print("⚠️ Nível de atenção.")
+        
+        led_vermelho.off()
+        led_amarelo.on()
+
+        buzzer.duty_u16(0)   # buzzer desligado
+
+    else:
+        # Distância pequena ⇒ reservatório cheio (nível normal)
+        print("Nível normal.")
+        
+        led_vermelho.off()
+        led_amarelo.off()
+        
+        buzzer.duty_u16(0)   # sem som
+
+    # Aguarda 1 segundo antes da próxima leitura
+    utime.sleep(1)
